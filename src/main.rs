@@ -1,4 +1,5 @@
 mod methods;
+mod platform;
 mod wiper;
 
 use std::path::PathBuf;
