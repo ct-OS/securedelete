@@ -169,6 +169,81 @@ nativo y recomienda la sobrescritura (`-d -m <method>`).
 - Los ficheros en sistemas de ficheros con **copia en escritura (COW)** como ZFS o Btrfs pueden dejar copias antiguas. En esos casos el borrado a nivel de dispositivo es más fiable.
 - Para garantías reales de destrucción de datos, la destrucción física del soporte es el único método 100 % efectivo.
 
+## Multiplataforma
+
+La herramienta funciona en **Linux, macOS, FreeBSD, OpenBSD, NetBSD, DragonFly BSD, Windows** y otros Unix. El código de plataforma está aislado en `src/platform/`:
+
+| Aspecto | Linux (`unix.rs`) | macOS (`macos.rs`) | FreeBSD/NetBSD/DragonFly (`bsd.rs`) | OpenBSD (`openbsd.rs`) | Windows (`windows.rs`) |
+| ------- | ----------------- | ------------------ | ----------------------------------- | ---------------------- | ---------------------- |
+| Detección del dispositivo | Block device (`FileTypeExt::is_block_device`) | Block **o** carácter (acepta `/dev/rdiskX`) | Block **o** carácter (los discos son nodos carácter) | Block **o** carácter (`/dev/rsd0c`) | Ruta `\\.\PhysicalDriveN` o `\\.\C:` |
+| Tamaño del dispositivo | `seek(SeekFrom::End(0))` | ioctl `DKIOCGETBLOCKCOUNT` × `DKIOCGETBLOCKSIZE` | ioctl `DIOCGMEDIASIZE` | ioctl `DIOCGDINFO` (`struct disklabel`) | `DeviceIoControl(IOCTL_DISK_GET_LENGTH_INFO)` |
+| Apertura del dispositivo | `open()` normal | `open()` normal | `open()` normal | `open()` normal | `CreateFile` con `share_mode(0)` y `FILE_FLAG_WRITE_THROUGH` |
+| Raíz del sistema (prohibida) | `/` | `/` | `/` | `/` | Unidad raíz (`C:\`, `D:\`, …) |
+
+El `seek(SeekFrom::End(0))` para obtener el tamaño solo es fiable en **Linux**. En macOS y los BSD, los nodos de dispositivo no reportan tamaño con `stat`/`lseek` (devuelven 0), así que se usan ioctls del sistema (`DKIOC…`/`DIOCG…`).
+
+### Rutas de dispositivo por plataforma
+
+| Plataforma | Ejemplos | Notas |
+| ---------- | -------- | ----- |
+| Linux | `/dev/sda`, `/dev/nvme0n1`, `/dev/mmcblk0` | Block devices clásicos. |
+| macOS | `/dev/disk2` (bufferizado) o `/dev/rdisk2` (crudo, más rápido) | Se requiere `sudo`. Tamaño vía `DKIOCGETBLOCKCOUNT`/`DKIOCGETBLOCKSIZE`. |
+| FreeBSD | `/dev/da0`, `/dev/ada0`, `/dev/nvd0` | Los discos son nodos **carácter** (no existe `/dev/rda0`). `DIOCGMEDIASIZE`. |
+| OpenBSD | `/dev/rsd0c` (crudo; partición `c` = disco completo) | `DIOCGDINFO` + `struct disklabel`. También se acepta `/dev/sd0`. |
+| NetBSD | `/dev/rwd0c` (crudo) | `DIOCGMEDIASIZE`. |
+| DragonFly | `/dev/da0`, `/dev/nvme0` | `DIOCGMEDIASIZE`. |
+| Windows | `\\.\PhysicalDrive1`, `\\.\C:` | Se requiere administrador; ver abajo. |
+
+### Windows
+
+- Los dispositivos se direccionan con rutas de dispositivo: `\\.\PhysicalDrive0`, `\\.\C:`, etc.
+- Se requiere **administrador** y `--force`:
+  ```powershell
+  secure-delete.exe -d -f -m random:1 \\.\PhysicalDrive1
+  ```
+- El tamaño del disco se obtiene vía `IOCTL_DISK_GET_LENGTH_INFO` y la escritura usa `FILE_FLAG_WRITE_THROUGH` para evitar la caché del sistema.
+
+### Compilar para cada plataforma
+
+```bash
+# Linux / macOS / BSD
+cargo build --release
+
+# Windows (cruzar desde Linux, solo comprueba; no enlaza)
+rustup target add x86_64-pc-windows-gnu
+cargo check --target x86_64-pc-windows-gnu
+
+# macOS (cruzar desde Linux)
+rustup target add x86_64-apple-darwin
+cargo check --target x86_64-apple-darwin
+
+# FreeBSD / NetBSD
+rustup target add x86_64-unknown-freebsd x86_64-unknown-netbsd
+cargo check --target x86_64-unknown-freebsd
+cargo check --target x86_64-unknown-netbsd
+
+# OpenBSD / DragonFly (sin std precompilado: se compila con build-std en nightly)
+rustup +nightly component add rust-src
+cargo +nightly check -Z build-std=core,alloc,std,proc_macro --target x86_64-unknown-openbsd
+cargo +nightly check -Z build-std=core,alloc,std,proc_macro --target x86_64-unknown-dragonfly
+```
+
+Las dependencias `windows-sys` (Windows) y `libc` (macOS y los BSD) son exclusivas de sus targets (`[target.'cfg(...)'.dependencies]`), por lo que no afectan a las demás compilaciones.
+
+## Desarrollo
+
+```bash
+# Compilar
+cargo build
+
+# Ejecutar los tests
+cargo test
+
+# Lint y formato
+cargo clippy --all-targets
+cargo fmt --check
+```
+
 ## Licencia
 
 MIT
