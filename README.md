@@ -6,6 +6,8 @@ A diferencia de un borrado normal (que solo elimina la entrada del sistema de fi
 
 > **Advertencia:** esta herramienta destruye datos de forma irreversible. Úsala solo sobre ficheros o dispositivos de los que quieras deshacerte definitivamente.
 
+> **Wiki:** historia del programa, de cada método de borrado y de las herramientas de sanitización en [`wiki/`](wiki/README.md).
+
 ## Características
 
 - Sobrescritura de ficheros o de **dispositivos de bloque** completos (por ejemplo `/dev/sdX`).
@@ -55,6 +57,8 @@ A diferencia de un borrado normal (que solo elimina la entrada del sistema de fi
 | `fill:XX` | `pattern:XX` | 1 | Rellena con el byte hexadecimal `XX` (p. ej. `fill:aa`, `pattern:0xff`). |
 
 Los datos aleatorios se generan con `rand` (`ChaCha12`/`ChaCha20`, alimentado por el sistema operativo).
+
+> **Nota:** los métodos de los estándares militares/históricos (`usarmy`, `navy`, `navy_mfm`, `usaf`, `userm`, `userm2`, `dod7`, `hmg`, `hmg5`, `rcmp`, `rcmp7`, `vsitr`, `gost`, `nsa`, `schneier`, `bmb21`, `bsi`, `doe`, `pfitzner`, `wipe27`) se incluyen por completitud y por motivos documentales, con sus patrones más habituales (las variantes que difundieron otras herramientas). Los métodos `arm38019`, `afssi5020_official`, `nsa1302`, `vsitr_official` y `hmg_baseline` implementan en cambio la secuencia descrita en el documento oficial (ver [`wiki/`](wiki/README.md)). Según NIST SP 800-88, para la mayoría de los soportes modernos una sola sobrescritura con `zeros` o `random` es suficiente.
 
 ## Instalación
 
