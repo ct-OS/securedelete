@@ -46,7 +46,7 @@ impl WipeMethod for WipeStatic {
         WIPE27.len()
     }
 
-    fn fill_buffer(&self, pass: usize, buffer: &mut [u8], _rng: &mut dyn RngCore) {
+    fn fill_buffer(&self, pass: usize, _seed: u64, buffer: &mut [u8], _rng: &mut dyn RngCore) {
         let pattern = WIPE27.get(pass).copied().unwrap_or(&[0x00]);
         for (i, byte) in buffer.iter_mut().enumerate() {
             *byte = pattern[i % pattern.len()];

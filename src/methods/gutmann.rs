@@ -47,7 +47,7 @@ impl WipeMethod for Gutmann {
         35
     }
 
-    fn fill_buffer(&self, pass: usize, buffer: &mut [u8], rng: &mut dyn RngCore) {
+    fn fill_buffer(&self, pass: usize, _seed: u64, buffer: &mut [u8], rng: &mut dyn RngCore) {
         match pass {
             0..=3 => rng.fill_bytes(buffer),
             _ => {

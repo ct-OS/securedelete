@@ -13,7 +13,7 @@ impl WipeMethod for DoD522022M {
         3
     }
 
-    fn fill_buffer(&self, pass: usize, buffer: &mut [u8], rng: &mut dyn RngCore) {
+    fn fill_buffer(&self, pass: usize, _seed: u64, buffer: &mut [u8], rng: &mut dyn RngCore) {
         match pass {
             0 => buffer.fill(0x00),
             1 => buffer.fill(0xFF),

@@ -30,7 +30,7 @@ impl WipeMethod for RandomPass {
         self.passes
     }
 
-    fn fill_buffer(&self, _pass: usize, buffer: &mut [u8], rng: &mut dyn RngCore) {
+    fn fill_buffer(&self, _pass: usize, _seed: u64, buffer: &mut [u8], rng: &mut dyn RngCore) {
         rng.fill_bytes(buffer);
     }
 }

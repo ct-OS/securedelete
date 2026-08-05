@@ -24,7 +24,7 @@ impl WipeMethod for PatternMethod {
         self.patterns.len()
     }
 
-    fn fill_buffer(&self, pass: usize, buffer: &mut [u8], rng: &mut dyn RngCore) {
+    fn fill_buffer(&self, pass: usize, _seed: u64, buffer: &mut [u8], rng: &mut dyn RngCore) {
         match self.patterns.get(pass).copied().flatten() {
             Some(byte) => buffer.fill(byte),
             None => rng.fill_bytes(buffer),
@@ -192,7 +192,7 @@ impl WipeMethod for DynamicFill {
         1
     }
 
-    fn fill_buffer(&self, _pass: usize, buffer: &mut [u8], _rng: &mut dyn RngCore) {
+    fn fill_buffer(&self, _pass: usize, _seed: u64, buffer: &mut [u8], _rng: &mut dyn RngCore) {
         buffer.fill(self.byte);
     }
 }

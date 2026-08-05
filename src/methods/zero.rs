@@ -13,7 +13,7 @@ impl WipeMethod for ZeroPass {
         1
     }
 
-    fn fill_buffer(&self, _pass: usize, buffer: &mut [u8], _rng: &mut dyn RngCore) {
+    fn fill_buffer(&self, _pass: usize, _seed: u64, buffer: &mut [u8], _rng: &mut dyn RngCore) {
         buffer.fill(0x00);
     }
 }
