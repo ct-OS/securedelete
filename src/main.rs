@@ -1,5 +1,6 @@
 mod methods;
 mod platform;
+mod signals;
 mod wiper;
 
 use std::fs;
@@ -16,7 +17,7 @@ struct Cli {
     #[arg(value_name = "PATH")]
     target: Option<PathBuf>,
 
-    /// Wipe method (use --list-methods to see all; supports random:N)
+    /// Wipe method (use --list-methods to see all; supports random:N and fill:XX)
     #[arg(short, long, default_value = "dod")]
     method: String,
 
@@ -43,9 +44,26 @@ struct Cli {
     secure_erase: bool,
 
     /// Use the "enhanced" / cryptographic variant of the native erase when
-    /// supported (ATA enhanced security erase). No-op for NVMe.
+    /// supported (ATA enhanced security erase; NVMe crypto erase).
     #[arg(long, requires = "secure_erase")]
     enhanced: bool,
+
+    /// Read back and verify the final pass after wiping
+    #[arg(long)]
+    verify: bool,
+
+    /// Show what would be done without wiping anything
+    #[arg(long)]
+    dry_run: bool,
+
+    /// Suppress the progress bar and informational notes
+    #[arg(short, long)]
+    quiet: bool,
+}
+
+fn is_random_method(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    lower == "random" || lower.starts_with("random:")
 }
 
 fn validate_target(cli: &Cli, target: &Path) -> Result<(), String> {
@@ -60,6 +78,7 @@ fn validate_target(cli: &Cli, target: &Path) -> Result<(), String> {
         if !cli.force {
             return Err("wiping a block device is dangerous and requires --force".into());
         }
+        platform::check_not_mounted(target).map_err(|e| e.to_string())?;
         return Ok(());
     }
 
@@ -79,14 +98,34 @@ fn validate_target(cli: &Cli, target: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn confirm(message: &str) -> bool {
+    eprintln!("{}", message);
+    print!("Are you sure? Type 'yes' to confirm: ");
+    io::stdout().flush().expect("failed to flush stdout");
+
+    let mut input = String::new();
+    io::stdin()
+        .read_line(&mut input)
+        .expect("failed to read input");
+    input.trim() == "yes"
+}
+
 fn main() {
+    signals::install();
     let cli = Cli::parse();
 
     if cli.list_methods {
         println!("Available wipe methods:");
-        for m in methods::get_all_methods() {
-            println!("  - {}", m.name());
+        for entry in methods::method_entries() {
+            let m = (entry.make)();
+            let mut line = format!("  - {}", m.name());
+            if !entry.aliases.is_empty() {
+                line.push_str(&format!(" [aliases: {}]", entry.aliases.join(", ")));
+            }
+            println!("{line}");
         }
+        println!("  - Random data (N passes) [random, random:N, or --passes N]");
+        println!("  - Fill with a fixed byte (1 pass) [fill:XX / pattern:XX, e.g. fill:ff]");
         return;
     }
 
@@ -108,42 +147,85 @@ fn main() {
         std::process::exit(2);
     });
 
+    if let Some(p) = cli.passes {
+        if !is_random_method(&cli.method) {
+            eprintln!(
+                "Warning: --passes {} ignored for method '{}' (it only applies to the 'random' method).",
+                p, cli.method
+            );
+        }
+    }
+
     if let Err(e) = validate_target(&cli, target) {
         eprintln!("Refusing to wipe {}: {}", target.display(), e);
         std::process::exit(2);
     }
 
+    let target_type = if cli.device { "DEVICE" } else { "FILE" };
+    if cli.dry_run {
+        println!(
+            "[dry-run] Would wipe {} ({}) using method \"{}\" ({} pass{}).",
+            target.display(),
+            target_type,
+            method,
+            method.passes(),
+            if method.passes() == 1 { "" } else { "es" }
+        );
+        return;
+    }
+
     if !cli.force {
-        let target_type = if cli.device { "DEVICE" } else { "FILE" };
-        eprintln!(
+        let ok = confirm(&format!(
             "\nWARNING: This will IRREVERSIBLY wipe {} ({}) using method \"{}\".",
             target.display(),
             target_type,
             method
-        );
-        print!("Are you sure? Type 'yes' to confirm: ");
-        io::stdout().flush().expect("failed to flush stdout");
-
-        let mut input = String::new();
-        io::stdin()
-            .read_line(&mut input)
-            .expect("failed to read input");
-        if input.trim() != "yes" {
+        ));
+        if !ok {
             println!("Aborted.");
             return;
         }
     }
 
+    if !cli.quiet {
+        let ssd = if cli.device {
+            platform::device_is_ssd(target)
+        } else {
+            platform::file_on_solid_state(target)
+        };
+        if ssd {
+            eprintln!(
+                "Note: the target is on a solid-state device; overwriting may not physically \
+                 erase all blocks (wear leveling). On Linux, prefer --secure-erase for SSDs."
+            );
+        }
+    }
+
     println!("Wiping {} using {}...", target.display(), method);
 
+    let opts = wiper::WipeOptions {
+        verify: cli.verify,
+        quiet: cli.quiet,
+    };
     let result = if cli.device {
-        wiper::wipe_device(target, method.as_ref())
+        wiper::wipe_device(target, method.as_ref(), &opts)
     } else {
-        wiper::wipe_file(target, method.as_ref())
+        wiper::wipe_file(target, method.as_ref(), &opts)
     };
 
     match result {
         Ok(()) => println!(" Done."),
+        Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+            eprintln!(
+                "Interrupted. The target was partially wiped and was NOT {}.",
+                if cli.device {
+                    "fully erased"
+                } else {
+                    "deleted"
+                }
+            );
+            std::process::exit(130);
+        }
         Err(e) => {
             eprintln!("Error: {}", e);
             std::process::exit(1);
@@ -166,6 +248,10 @@ fn run_secure_erase(cli: &Cli, target: &Path) {
         );
         std::process::exit(2);
     }
+    if let Err(e) = platform::check_not_mounted(target) {
+        eprintln!("Refusing to erase {}: {}", target.display(), e);
+        std::process::exit(2);
+    }
 
     let kind = match secure_erase::media_kind(target) {
         Ok(k) => k,
@@ -175,20 +261,22 @@ fn run_secure_erase(cli: &Cli, target: &Path) {
         }
     };
 
-    if !cli.force {
-        eprintln!(
-            "\nWARNING: This will IRREVERSIBLY erase {} ({}) using the device's native firmware erase.",
+    if cli.dry_run {
+        println!(
+            "[dry-run] Would issue a native firmware erase on {} ({}).",
             target.display(),
             device_kind_label(&kind)
         );
-        print!("Are you sure? Type 'yes' to confirm: ");
-        io::stdout().flush().expect("failed to flush stdout");
+        return;
+    }
 
-        let mut input = String::new();
-        io::stdin()
-            .read_line(&mut input)
-            .expect("failed to read input");
-        if input.trim() != "yes" {
+    if !cli.force {
+        let ok = confirm(&format!(
+            "\nWARNING: This will IRREVERSIBLY erase {} ({}) using the device's native firmware erase.",
+            target.display(),
+            device_kind_label(&kind)
+        ));
+        if !ok {
             println!("Aborted.");
             return;
         }

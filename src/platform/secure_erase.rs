@@ -260,7 +260,7 @@ fn run_sg_io(f: &std::fs::File, cdb: &[u8], data: Option<&mut [u8]>) -> io::Resu
         dxferp,
         cmdp: cdb.as_ptr() as *mut c_uchar,
         sbp: sb.as_mut_ptr(),
-        timeout: 2_000_000,
+        timeout: 21_600_000, // 6 h: a security erase can take hours on big HDDs
         flags: 0,
         pack_id: 0,
         usr_ptr: std::ptr::null_mut(),
@@ -336,7 +336,7 @@ pub fn nvme_secure_erase(path: &Path, crypto: bool) -> io::Result<()> {
         opcode: NVME_ADMIN_FORMAT,
         nsid,
         cdw10: ses << 8,
-        timeout_ms: 1_200_000,
+        timeout_ms: 3_600_000, // 1 h: large namespaces can format slowly
         ..Default::default()
     };
     let rc = unsafe { ioctl(f.as_raw_fd(), NVME_IOCTL_ADMIN_CMD, &mut cmd) };
@@ -370,12 +370,18 @@ pub fn nvme_sanitize(path: &Path, crypto: bool) -> io::Result<()> {
 }
 
 /// Backend de alto nivel: detecta el medio y aplica la estrategia nativa.
+/// `enhanced` selecciona la variante criptográfica cuando el dispositivo la
+/// soporta (ATA enhanced security erase; NVMe crypto erase).
 pub fn secure_erase_device(path: &Path, enhanced: bool) -> io::Result<SecureEraseReport> {
     if is_nvme(path) {
-        nvme_secure_erase(path, false)?;
+        nvme_secure_erase(path, enhanced)?;
         return Ok(SecureEraseReport {
             kind: MediaKind::SolidState,
-            backend: "NVMe Format NVM (Secure Erase: user data erase)",
+            backend: if enhanced {
+                "NVMe Format NVM (crypto erase)"
+            } else {
+                "NVMe Format NVM (Secure Erase: user data erase)"
+            },
         });
     }
     let kind = media_kind(path)?;
