@@ -11,11 +11,17 @@ A diferencia de un borrado normal (que solo elimina la entrada del sistema de fi
 ## Características
 
 - Sobrescritura de ficheros o de **dispositivos de bloque** completos (por ejemplo `/dev/sdX`).
-- Varios métodos de borrado: relleno con ceros, datos aleatorios, DoD 5220.22-M y Gutmann.
+- Varios métodos de borrado: relleno con ceros, datos aleatorios, DoD 5220.22-M, Gutmann y más (32 métodos + `random:N` y `fill:XX`).
 - Número de pasadas aleatorias configurable (`random:N` o `--passes N`).
-- Barra de progreso con pasada actual, porcentaje y tiempo restante.
-- `fsync`/`sync_all` por pasada y tras el truncado, para que los datos no queden en caché.
-- Comprobaciones de seguridad: rechaza directorios, symlinks, la raíz del sistema y requiere `--force` para dispositivos de bloque.
+- Barra de progreso con pasada actual, porcentaje y tiempo restante (`-q` para silenciarla).
+- `fdatasync`/`sync_all` por pasada, tras el truncado y del directorio padre tras el unlink.
+- **`--verify`**: relee el medio tras la última pasada y comprueba que el patrón se escribió correctamente.
+- **Ficheros sparse**: en Linux se detectan los agujeros con `SEEK_DATA`/`SEEK_HOLE` y solo se sobrescriben los rangos con datos.
+- **`--dry-run`**: muestra qué se haría sin tocar nada.
+- **Ctrl-C seguro**: el borrado se detiene de forma limpia entre pasadas (salida 130) y se informa del estado parcial.
+- Comprobaciones de seguridad: rechaza directorios, symlinks (y abre con `O_NOFOLLOW`), la raíz del sistema, dispositivos **montados** y requiere `--force` para dispositivos de bloque.
+- Aviso si el objetivo está en un **SSD** (sobrescritura poco fiable; sugiere `--secure-erase`).
+- Errores con contexto: los fallos de I/O incluyen la ruta afectada.
 
 ## Métodos de borrado
 
@@ -100,8 +106,17 @@ secure-delete -f -m random --passes 5 documento.pdf
 # Borrar con el algoritmo de Gutmann (35 pasadas)
 secure-delete -f -m gutmann documento.pdf
 
-# Listar los métodos disponibles
+# Listar los métodos disponibles (con sus alias)
 secure-delete --list-methods
+
+# Verificar la última pasada leyendo el medio tras borrar
+secure-delete -f -m random:1 --verify documento.pdf
+
+# Simular sin borrar nada
+secure-delete -f -m dod --dry-run documento.pdf
+
+# Silenciar la barra de progreso
+secure-delete -f -q documento.pdf
 ```
 
 ## Uso completo
@@ -114,13 +129,16 @@ Arguments:
 
 Options:
   -m, --method <METHOD>  Método de borrado (usa --list-methods para ver todos;
-                         soporta random:N)
+                         soporta random:N y fill:XX)
   -d, --device           Borrar un dispositivo/block device en vez de un fichero
   -f, --force            Omitir la confirmación (obligatorio para borrar dispositivos)
       --passes <N>       Número de pasadas para el método "random" (default: 1)
       --secure-erase     Borrado nativo del firmware (ATA Security Erase / NVMe
                          Format); ideal para SSD. Solo Linux y con -d
       --enhanced         Variante enhanced/criptográfica del borrado nativo
+      --verify           Leer de vuelta y verificar la última pasada tras borrar
+      --dry-run          Mostrar qué se haría sin borrar nada
+  -q, --quiet            Ocultar la barra de progreso y las notas informativas
       --list-methods     Listar los métodos de borrado disponibles
   -h, --help             Mostrar la ayuda
 ```
@@ -155,17 +173,39 @@ sudo secure-delete -d --secure-erase --enhanced /dev/sdX
 
 Internamente: detecta el tipo de medio con el ioctl `BLKROTATIONAL` (`/dev/sdX`), emite
 *ATA Security Erase* vía `SG_IO` (ATA PASS-THROUGH 16) para SATA, y *Format NVM* con
-*Secure Erase Setting* vía `NVME_IOCTL_ADMIN_CMD` para NVMe. Si el disco está *frozen*
-(típico en portátiles), el ATA Security Erase falla: descongélalo con un ciclo
-suspender/reanudar antes de reintentar. Para discos rotacionales rechaza el borrado
-nativo y recomienda la sobrescritura (`-d -m <method>`).
+*Secure Erase Setting* vía `NVME_IOCTL_ADMIN_CMD` para NVMe. Con `--enhanced` en NVMe se
+usa *crypto erase* (SES=2, solo en unidades autocifradas; fallará con un error claro en
+el resto). Si el disco está *frozen* (típico en portátiles), el ATA Security Erase falla:
+descongélalo con un ciclo suspender/reanudar antes de reintentar. Para discos rotacionales
+rechaza el borrado nativo y recomienda la sobrescritura (`-d -m <method>`).
+
+## Verificación y seguridad
+
+- **`--verify`**: tras la última pasada, la herramienta relee el medio en bloques de
+  1 MiB y lo compara con el patrón esperado (regenerado de forma determinista a partir
+  de la semilla aleatoria de la pasada). Si hay cualquier byte distinto, se aborta con un
+  error indicando el offset. Útil para detectar sectores reasignados o fallos de caché.
+- **Dispositivos montados**: en Linux, `-d` y `--secure-erase` se niegan a borrar un
+  dispositivo que esté montado (o cuyas particiones lo estén, p. ej. `/dev/sda` con
+  `/dev/sda1` montado) o que contenga la raíz del sistema (`/`). Lee `/proc/self/mounts`
+  y compara los `rdev`.
+- **Ficheros sparse**: en Linux se usa `SEEK_DATA`/`SEEK_HOLE` para escribir solo los
+  rangos con datos. Los agujeros no contienen datos y no se tocan; los sistemas de
+  ficheros sin soporte se limpian al completo como antes.
+- **Ctrl-C**: la interrupción se captura (SIGINT/SIGTERM, Ctrl-C en Windows) y el borrado
+  se detiene entre pasadas o entre bloques. Se informa del estado parcial y el fichero NO
+  se elimina; la salida es 130.
+- **Aviso SSD**: si el objetivo está en una unidad de estado sólido (ioctl
+  `BLKROTATIONAL` sobre el dispositivo contenedor), se muestra una nota indicando que la
+  sobrescritura puede no borrar físicamente todos los bloques y se sugiere `--secure-erase`.
 
 ## Cómo funciona
 
-1. **Validación:** se comprueba que el objetivo sea un fichero regular o un block device, y que no se trate de un directorio, symlink ni la raíz del sistema.
-2. **Confirmación:** se pide escribir `yes` a no ser que se use `--force`.
-3. **Sobrescritura:** para cada pasada del método, el fichero/dispositivo se recorre de principio a fin rellenando buffers de 1 MiB. Tras cada pasada se ejecuta `fsync` para forzar el volcado a disco.
-4. **Eliminación:** al terminar, el fichero se trunca a 0, se sincroniza de nuevo y se elimina.
+1. **Validación:** se comprueba que el objetivo sea un fichero regular o un block device, y que no se trate de un directorio, symlink, la raíz del sistema ni (en Linux) un dispositivo montado. Los ficheros se abren con `O_NOFOLLOW` para evitar carreras de symlinks.
+2. **Confirmación:** se pide escribir `yes` a no ser que se use `--force` (o `--dry-run`).
+3. **Sobrescritura:** para cada pasada del método, el fichero/dispositivo se recorre de principio a fin rellenando buffers de 1 MiB (en Linux, los ficheros sparse solo sobrescriben sus rangos con datos). Cada pasada usa un flujo aleatorio determinista derivado de una semilla única, lo que permite verificar o reproducir cualquier pasada. Tras cada pasada se ejecuta `fdatasync`/`fsync` para forzar el volcado a disco.
+4. **Verificación (opcional, `--verify`):** se relee el medio y se compara con la última pasada.
+5. **Eliminación:** al terminar, el fichero se trunca a 0, se sincroniza de nuevo, se elimina y se hace `fsync` del directorio padre para que el unlink sea durable. Ctrl-C en cualquier momento detiene el proceso sin borrar el fichero.
 
 ## Limitaciones
 
@@ -206,6 +246,7 @@ El `seek(SeekFrom::End(0))` para obtener el tamaño solo es fiable en **Linux**.
   secure-delete.exe -d -f -m random:1 \\.\PhysicalDrive1
   ```
 - El tamaño del disco se obtiene vía `IOCTL_DISK_GET_LENGTH_INFO` y la escritura usa `FILE_FLAG_WRITE_THROUGH` para evitar la caché del sistema.
+- Los ficheros con el atributo de **solo lectura** se limpian automáticamente (se quita el atributo antes de abrirlos) para que el borrado y la eliminación no fallen.
 
 ### Compilar para cada plataforma
 
@@ -247,6 +288,9 @@ cargo test
 cargo clippy --all-targets
 cargo fmt --check
 ```
+
+Hay un workflow de CI (`.github/workflows/ci.yml`) que ejecuta fmt, clippy con
+`-D warnings`, los tests y comprobaciones cruzadas para Windows, macOS y los BSD.
 
 ## Licencia
 
