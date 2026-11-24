@@ -9,7 +9,7 @@ y por qué.
 1. **[El programa](el-programa.md)** — qué es SecureDelete, cómo funciona, instalación y uso.
 2. **[Historia de la eliminación de datos](historia.md)** — de la remanencia magnética a los estándares modernos (1940–2025).
 3. **[Los métodos en detalle](metodos.md)** — las 28 métodos, sus alias y pasadas.
-4. **[Estándares de Estados Unidos](estandares-eeuu.md)** — DoD, Ejército, Armada, Fuerza Aérea, NSA, DOE y NIST.
+4. **[Estándares de Estados Unidos](estandares-eeuu.md)** — tabla resumen, NCSC-TG-025, DoD, Ejército, Armada, Fuerza Aérea, NSA, DOE y NIST, y qué método elegir hoy.
 5. **[Estándares de Europa y otros países](estandares-europa-y-otros.md)** — Reino Unido, Canadá, Alemania, Rusia, y los esquemas académicos (Gutmann, Schneier, Pfitzner).
 6. **[Historia de las herramientas](herramientas-historicas.md)** — shred, wipe, ya-wipe, scrub, DBAN, nwipe, Eraser, BleachBit y `srm`.
 7. **[Fuentes y referencias](fuentes.md)** — documentación consultada.

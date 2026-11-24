@@ -24,7 +24,7 @@ método elegido.
 | Sistema operativo | Soporte | Cómo se obtiene el tamaño del dispositivo |
 |---|---|---|
 | Linux | Sí (nativo) | `ioctl(BLKGETSIZE64)` |
-| Windows | Sí (GNU toolchain) | `DeviceIoControl(IOCTL_DISK_GET_DRIVE_GEOMETRY_EX)` |
+| Windows | Sí (MSVC o GNU) | `DeviceIoControl(IOCTL_DISK_GET_DRIVE_GEOMETRY_EX)` |
 | macOS | Sí | `ioctl(DKIOCGETBLOCKCOUNT)` / `DKIOCGETBLOCKSIZE` |
 | FreeBSD | Sí | `ioctl(DIOCGMEDIASIZE)` |
 | OpenBSD | Sí | `ioctl(DIOCGDINFO)` + `struct disklabel` |
@@ -80,9 +80,14 @@ src/
 
 ## Construcción
 
+Las versiones publicadas se distribuyen como paquetes `.deb` para Deepin y Debian (línea de
+órdenes e interfaz gráfica DTK6), `.zip` para Windows y un binario universal para macOS;
+los detalles están en el [README](../README.md#paquetes-publicados). Para compilar desde
+el código:
+
 ```
 cargo build --release
-cargo test          # 32 pruebas
+cargo test          # pruebas unitarias de métodos, wiper y dispositivos
 cargo clippy --all-targets
 ```
 

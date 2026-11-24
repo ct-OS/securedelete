@@ -21,8 +21,8 @@ Los métodos se registran en `src/methods/mod.rs` con nombre canónico y aliases
 | `navy` | `navso`, `navso5239` | 3 | R, R, R | NAVSO P-5239-26 (variante RLL) |
 | `navy_mfm` | `navso_mfm`, `navso5239mfm` | 3 | R, ~R, R | NAVSO P-5239-26 (variante MFM) |
 | `usaf` | `afssi5020` | 3 | 00, FF, 00 | AFSSI-5020 (variante de herramientas) |
-| `dod` | `dod522022m` | 3 | 00, FF, R | "DoD 5220.22-M" (folklore de proveedores) |
-| `dod7` | `dod522022m7`, `dodece` | 7 | 00,FF,R,00,FF,R,00 | DoD ECE (variante no oficial, ~2001) |
+| `dod` | `dod522022m` | 3 | 00, FF, R | DoD 5220.22-M §8-306, opción E (1995; caracteres elegidos por las herramientas) |
+| `dod7` | `dod522022m7`, `dodece` | 7 | 00,FF,R,00,FF,R,00 | DoD 5220.22-M "ECE" (opciones E, C y E de la matriz de 1995; secuencia de herramientas) |
 | `hmg` | `isc5` | 3 | 00, FF, R | HMG IS5 Baseline/Enhanced (variante) |
 | `hmg5` | `isc5e`, `hmg_enhanced` | 5 | 00, FF, R, 00, FF | HMG IS5 Enhanced (variante de 5 pasadas) |
 | `rcmp` | `tssit`, `opsii` | 4 | FF, 00, FF, 00 | RCMP TSSIT OPS-II (simplificación de 4 pasadas) |
@@ -53,13 +53,15 @@ Los métodos se registran en `src/methods/mod.rs` con nombre canónico y aliases
 
 ## Sobre las "pasadas DoD" y los mitos
 
-- **DoD 5220.22-M (NISPOM), publicado en 1995**: el manual **no contiene** el famoso
-  esquema de "3 pasadas". El "borrado DoD de 3 pasadas" (00, FF, aleatorio) es una
-  invención de proveedores de software de finales de los 90 que se repitió hasta
-  convertirse en mito. En **2006 el DoD eliminó de su manual todas las especificaciones
-  de sobrescritura**.
-- **DoD ECE de 7 pasadas**: tampoco es oficial; es un apéndice informal circulado en
-  memorandos internos (~2001) que nunca formó parte de un manual publicado.
+- **DoD 5220.22-M (NISPOM), edición de 1995**: su matriz de borrado y saneamiento
+  (párrafo 8-306) incluía la opción **E**: sobrescribir con *un carácter, su complemento
+  y un carácter aleatorio, y verificar*. Ese es el origen del "DoD de 3 pasadas"; los
+  bytes concretos (`00, FF, aleatorio`) los eligieron los programadores, el manual no los
+  fija. En **2006 el DoD eliminó del manual la matriz y toda especificación de
+  sobrescritura**, así que hoy "cumplir DoD 5220.22-M" es una referencia histórica.
+- **DoD ECE de 7 pasadas**: es la combinación de las opciones **E, C y E** de la misma
+  matriz. El manual nunca definió una secuencia de 7 pasadas; el nombre y los bytes
+  son de las herramientas.
 - Por eso esta wiki distingue siempre entre **el documento real** y **la variante que
   usan las herramientas** (incluida esta). Ver [estandares-eeuu.md](estandares-eeuu.md).
 

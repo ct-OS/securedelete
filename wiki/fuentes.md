@@ -7,7 +7,13 @@ primaria.
 
 ## Estándares y manuales
 
-- **DoD 5220.22-M / NISPOM** (1995; cambios 2013, 2016; 32 CFR Part 117, 2021).
+- **NCSC-TG-025**, *A Guide to Understanding Data Remanence in Automated Information
+  Systems*, National Computer Security Center, versión 2, sept-1991 (Rainbow Series).
+- **DoD 5220.22-M / NISPOM**, ed. ene-1995 (cap. 8, párr. 8-306, *Clearing and
+  Sanitization Matrix*); reeditado 28-feb-2006 sin la matriz; cambios 2013, 2016;
+  32 CFR Part 117, 2021.
+- **NSA/CSS Policy Manual 9-12**, *Storage Device Sanitization*, sucesor del Manual 130-2.
+- **AR 25-2**, *Information Assurance*, US Army, 2003 (sustituye a AR 380-19).
 - **AR 380-19**, *Information Systems Security*, US Army, ed. 27-feb-1998, apéndice de borrado.
 - **NAVSO P-5239-26**, *Remanence Security Guidebook*, Module 26, Naval Information Systems
   Management Center, sept-1993.
