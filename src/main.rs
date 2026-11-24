@@ -1,16 +1,14 @@
-mod methods;
-mod platform;
-mod signals;
-mod wiper;
-
-use std::fs;
-use std::io::{self, Write};
+use std::cell::Cell;
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 use clap::Parser;
+use indicatif::{ProgressBar, ProgressStyle};
+
+use secure_delete::{methods, platform, signals, wiper};
 
 #[derive(Parser)]
-#[command(name = "secure-delete")]
+#[command(name = "secure-delete", version)]
 #[command(about = "Securely delete files or storage devices using data overwriting", long_about = None)]
 struct Cli {
     /// Target path (file or device)
@@ -37,6 +35,10 @@ struct Cli {
     #[arg(long)]
     list_methods: bool,
 
+    /// List the storage devices that can be wiped (Linux)
+    #[arg(long)]
+    list_devices: bool,
+
     /// Use the device's native firmware erase (ATA Security Erase for SATA,
     /// Format NVM with Secure Erase for NVMe) instead of overwriting. Only for
     /// block devices; ideal for SSDs where overwrite is unreliable. Linux only.
@@ -59,6 +61,12 @@ struct Cli {
     /// Suppress the progress bar and informational notes
     #[arg(short, long)]
     quiet: bool,
+
+    /// Internal, for the graphical front-end running this tool through
+    /// pkexec: print machine-readable progress ("@sd ..." lines) on stdout
+    /// and cancel the wipe when stdin is closed.
+    #[arg(long, hide = true, requires = "force")]
+    gui_helper: bool,
 }
 
 fn is_random_method(name: &str) -> bool {
@@ -67,35 +75,138 @@ fn is_random_method(name: &str) -> bool {
 }
 
 fn validate_target(cli: &Cli, target: &Path) -> Result<(), String> {
-    if platform::is_system_root(target) {
-        return Err("refusing to wipe a system root".into());
-    }
-
     if cli.device {
+        // Cheap checks first so the --force error is not hidden behind them.
         if !platform::is_block_device(target) {
-            return Err("target is not a block device; pass a device path (e.g. /dev/sdX or \\\\.\\PhysicalDrive0)".into());
+            return secure_delete::validate_device_target(target);
         }
         if !cli.force {
             return Err("wiping a block device is dangerous and requires --force".into());
         }
-        platform::check_not_mounted(target).map_err(|e| e.to_string())?;
-        return Ok(());
+        return secure_delete::validate_device_target(target);
     }
+    secure_delete::validate_file_target(target)
+}
 
-    let meta = fs::symlink_metadata(target).map_err(|e| e.to_string())?;
+/// Terminal progress bar for the wiper.
+struct CliProgress(ProgressBar);
 
-    if meta.file_type().is_symlink() {
-        return Err("target is a symbolic link; pass the real path instead".into());
-    }
-
-    if !meta.file_type().is_file() {
-        if meta.file_type().is_dir() {
-            return Err("target is a directory".into());
+impl CliProgress {
+    fn new(quiet: bool) -> Self {
+        if quiet {
+            return CliProgress(ProgressBar::hidden());
         }
-        return Err("target is not a regular file".into());
+        let pb = ProgressBar::new(0);
+        pb.set_style(
+            ProgressStyle::with_template(
+                "{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({eta}) {msg}",
+            )
+            .unwrap()
+            .progress_chars("#>-"),
+        );
+        CliProgress(pb)
     }
+}
 
-    Ok(())
+impl wiper::Progress for CliProgress {
+    fn start(&self, total: u64) {
+        self.0.set_length(total);
+    }
+    fn set_message(&self, msg: &str) {
+        self.0.set_message(msg.to_string());
+    }
+    fn set_position(&self, pos: u64) {
+        self.0.set_position(pos);
+    }
+    fn finish(&self) {
+        self.0.finish_and_clear();
+    }
+}
+
+/// Machine-readable progress for `--gui-helper`:
+/// `@sd start <bytes>`, `@sd phase <text>`, `@sd pos <permille>`.
+struct HelperProgress {
+    total: Cell<u64>,
+    last: Cell<Option<u64>>,
+}
+
+impl HelperProgress {
+    fn new() -> Self {
+        HelperProgress {
+            total: Cell::new(0),
+            last: Cell::new(None),
+        }
+    }
+}
+
+impl wiper::Progress for HelperProgress {
+    fn start(&self, total: u64) {
+        self.total.set(total);
+        println!("@sd start {total}");
+    }
+    fn set_message(&self, msg: &str) {
+        self.last.set(None);
+        println!("@sd phase {msg}");
+    }
+    fn set_position(&self, pos: u64) {
+        let total = self.total.get().max(1);
+        let permille = (pos.min(total) as u128 * 1000 / total as u128) as u64;
+        if self.last.get() != Some(permille) {
+            self.last.set(Some(permille));
+            println!("@sd pos {permille}");
+        }
+    }
+}
+
+/// The GUI cannot signal a process running as root, so it closes our stdin
+/// instead; treat EOF (or a read error) as a cancellation request.
+fn cancel_on_stdin_eof() {
+    std::thread::spawn(|| {
+        let mut buf = [0u8; 64];
+        let mut stdin = io::stdin();
+        while let Ok(n) = stdin.read(&mut buf) {
+            if n == 0 {
+                break;
+            }
+        }
+        signals::request_cancel();
+    });
+}
+
+fn list_devices() {
+    use secure_delete::devices;
+
+    let found = devices::list_devices();
+    if found.is_empty() {
+        println!("No storage devices found (device discovery is only supported on Linux).");
+        return;
+    }
+    for d in found {
+        let mut tags = Vec::new();
+        if d.usb {
+            tags.push("USB");
+        } else if d.removable {
+            tags.push("removable");
+        }
+        if d.loop_backing.is_some() {
+            tags.push("loop");
+        } else {
+            tags.push(if d.rotational { "HDD" } else { "SSD/flash" });
+        }
+        let model = if d.model.is_empty() { "-" } else { &d.model };
+        let status = match secure_delete::validate_device_target(&d.path) {
+            Ok(()) => "ok".to_string(),
+            Err(e) => format!("in use: {e}"),
+        };
+        println!(
+            "{:<14} {:>9}  {:<28} [{}]  {}",
+            d.path.display(),
+            devices::format_size(d.size),
+            model,
+            tags.join(", "),
+            status
+        );
+    }
 }
 
 fn confirm(message: &str) -> bool {
@@ -113,6 +224,9 @@ fn confirm(message: &str) -> bool {
 fn main() {
     signals::install();
     let cli = Cli::parse();
+    if cli.gui_helper {
+        cancel_on_stdin_eof();
+    }
 
     if cli.list_methods {
         println!("Available wipe methods:");
@@ -126,6 +240,11 @@ fn main() {
         }
         println!("  - Random data (N passes) [random, random:N, or --passes N]");
         println!("  - Fill with a fixed byte (1 pass) [fill:XX / pattern:XX, e.g. fill:ff]");
+        return;
+    }
+
+    if cli.list_devices {
+        list_devices();
         return;
     }
 
@@ -187,7 +306,7 @@ fn main() {
         }
     }
 
-    if !cli.quiet {
+    if !cli.quiet && !cli.gui_helper {
         let ssd = if cli.device {
             platform::device_is_ssd(target)
         } else {
@@ -203,14 +322,16 @@ fn main() {
 
     println!("Wiping {} using {}...", target.display(), method);
 
-    let opts = wiper::WipeOptions {
-        verify: cli.verify,
-        quiet: cli.quiet,
+    let opts = wiper::WipeOptions { verify: cli.verify };
+    let progress: Box<dyn wiper::Progress> = if cli.gui_helper {
+        Box::new(HelperProgress::new())
+    } else {
+        Box::new(CliProgress::new(cli.quiet))
     };
     let result = if cli.device {
-        wiper::wipe_device(target, method.as_ref(), &opts)
+        wiper::wipe_device(target, method.as_ref(), &opts, progress.as_ref())
     } else {
-        wiper::wipe_file(target, method.as_ref(), &opts)
+        wiper::wipe_file(target, method.as_ref(), &opts, progress.as_ref())
     };
 
     match result {

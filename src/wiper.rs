@@ -2,7 +2,6 @@ use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
-use indicatif::{ProgressBar, ProgressStyle};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
@@ -15,23 +14,27 @@ const BUFFER_SIZE: usize = 1024 * 1024;
 pub struct WipeOptions {
     /// Read back and compare the final pass after wiping.
     pub verify: bool,
-    /// Suppress the progress bar.
-    pub quiet: bool,
 }
 
-fn progress_style() -> ProgressStyle {
-    ProgressStyle::with_template(
-        "{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({eta}) {msg}",
-    )
-    .unwrap()
-    .progress_chars("#>-")
+/// Receives progress updates from a running wipe. The CLI renders them with
+/// a terminal progress bar; a GUI can forward them to its event loop.
+///
+/// `set_position` counts bytes within the current phase (a pass or the
+/// verification), which always spans `total` bytes.
+pub trait Progress {
+    /// Called once before any I/O with the bytes processed per phase.
+    fn start(&self, _total: u64) {}
+    /// A new phase begins (e.g. "pass 2/3 - DoD 5220.22-M" or "verifying").
+    fn set_message(&self, _msg: &str) {}
+    fn set_position(&self, _pos: u64) {}
+    /// Called once when the wipe stops, successfully or not.
+    fn finish(&self) {}
 }
 
-fn new_progress(size: u64) -> ProgressBar {
-    let pb = ProgressBar::new(size);
-    pb.set_style(progress_style());
-    pb
-}
+/// A [`Progress`] that ignores all updates.
+pub struct NoProgress;
+
+impl Progress for NoProgress {}
 
 fn pass_message(method: &dyn WipeMethod, pass: usize) -> String {
     format!("pass {}/{} - {}", pass + 1, method.passes(), method.name())
@@ -92,14 +95,14 @@ fn wipe_passes(
     ranges: &[(u64, u64)],
     method: &dyn WipeMethod,
     seed: u64,
-    pb: &ProgressBar,
+    pb: &dyn Progress,
     buffer: &mut [u8],
 ) -> io::Result<()> {
     for pass in 0..method.passes() {
         if interrupted() {
             return Err(interrupted_error());
         }
-        pb.set_message(pass_message(method, pass));
+        pb.set_message(&pass_message(method, pass));
         pb.set_position(0);
         let mut rng = StdRng::seed_from_u64(pass_seed(seed, pass));
         let mut done: u64 = 0;
@@ -128,7 +131,7 @@ fn verify_last_pass(
     method: &dyn WipeMethod,
     seed: u64,
     ranges: &[(u64, u64)],
-    pb: &ProgressBar,
+    pb: &dyn Progress,
 ) -> io::Result<()> {
     let last = method.passes() - 1;
     let mut rng = StdRng::seed_from_u64(pass_seed(seed, last));
@@ -163,11 +166,22 @@ fn verify_last_pass(
     Ok(())
 }
 
-pub fn wipe_file(path: &Path, method: &dyn WipeMethod, opts: &WipeOptions) -> io::Result<()> {
-    wipe_file_inner(path, method, opts).map_err(|e| with_path(path, e))
+/// Overwrite a regular file with `method`, then truncate and delete it.
+pub fn wipe_file(
+    path: &Path,
+    method: &dyn WipeMethod,
+    opts: &WipeOptions,
+    pb: &dyn Progress,
+) -> io::Result<()> {
+    wipe_file_inner(path, method, opts, pb).map_err(|e| with_path(path, e))
 }
 
-fn wipe_file_inner(path: &Path, method: &dyn WipeMethod, opts: &WipeOptions) -> io::Result<()> {
+fn wipe_file_inner(
+    path: &Path,
+    method: &dyn WipeMethod,
+    opts: &WipeOptions,
+    pb: &dyn Progress,
+) -> io::Result<()> {
     let size = fs::metadata(path)?.len();
     if size == 0 {
         fs::remove_file(path)?;
@@ -182,23 +196,19 @@ fn wipe_file_inner(path: &Path, method: &dyn WipeMethod, opts: &WipeOptions) -> 
     let total = ranges_total(&ranges);
     let seed: u64 = rand::random();
 
-    let pb = if opts.quiet {
-        ProgressBar::hidden()
-    } else {
-        new_progress(total)
-    };
+    pb.start(total);
     let mut buffer = vec![0u8; BUFFER_SIZE];
 
     let result = (|| -> io::Result<()> {
-        wipe_passes(&mut file, &ranges, method, seed, &pb, &mut buffer)?;
+        wipe_passes(&mut file, &ranges, method, seed, pb, &mut buffer)?;
         if opts.verify {
             pb.set_message("verifying");
             pb.set_position(0);
-            verify_last_pass(&mut file, method, seed, &ranges, &pb)?;
+            verify_last_pass(&mut file, method, seed, &ranges, pb)?;
         }
         Ok(())
     })();
-    pb.finish_and_clear();
+    pb.finish();
     result?;
 
     // Truncate and flush so no residual data remains after unlink.
@@ -211,11 +221,22 @@ fn wipe_file_inner(path: &Path, method: &dyn WipeMethod, opts: &WipeOptions) -> 
     Ok(())
 }
 
-pub fn wipe_device(path: &Path, method: &dyn WipeMethod, opts: &WipeOptions) -> io::Result<()> {
-    wipe_device_inner(path, method, opts).map_err(|e| with_path(path, e))
+/// Overwrite a whole block device (or any file, keeping it) with `method`.
+pub fn wipe_device(
+    path: &Path,
+    method: &dyn WipeMethod,
+    opts: &WipeOptions,
+    pb: &dyn Progress,
+) -> io::Result<()> {
+    wipe_device_inner(path, method, opts, pb).map_err(|e| with_path(path, e))
 }
 
-fn wipe_device_inner(path: &Path, method: &dyn WipeMethod, opts: &WipeOptions) -> io::Result<()> {
+fn wipe_device_inner(
+    path: &Path,
+    method: &dyn WipeMethod,
+    opts: &WipeOptions,
+    pb: &dyn Progress,
+) -> io::Result<()> {
     let mut device = crate::platform::open_device(path)?;
     let size = crate::platform::device_size(&mut device)?;
     if size == 0 {
@@ -227,23 +248,19 @@ fn wipe_device_inner(path: &Path, method: &dyn WipeMethod, opts: &WipeOptions) -
 
     let ranges = vec![(0u64, size)];
     let seed: u64 = rand::random();
-    let pb = if opts.quiet {
-        ProgressBar::hidden()
-    } else {
-        new_progress(size)
-    };
+    pb.start(size);
     let mut buffer = vec![0u8; BUFFER_SIZE];
 
     let result = (|| -> io::Result<()> {
-        wipe_passes(&mut device, &ranges, method, seed, &pb, &mut buffer)?;
+        wipe_passes(&mut device, &ranges, method, seed, pb, &mut buffer)?;
         if opts.verify {
             pb.set_message("verifying");
             pb.set_position(0);
-            verify_last_pass(&mut device, method, seed, &ranges, &pb)?;
+            verify_last_pass(&mut device, method, seed, &ranges, pb)?;
         }
         Ok(())
     })();
-    pb.finish_and_clear();
+    pb.finish();
     result
 }
 
@@ -271,7 +288,7 @@ mod tests {
         let content = b"hello world this is a secret";
         fs::write(&path, content).unwrap();
 
-        wipe_device(&path, &ZeroPass, &WipeOptions::default()).unwrap();
+        wipe_device(&path, &ZeroPass, &WipeOptions::default(), &NoProgress).unwrap();
 
         let data = fs::read(&path).unwrap();
         assert_eq!(data.len(), content.len());
@@ -285,7 +302,7 @@ mod tests {
         let path = temp_path("device_size");
         fs::write(&path, vec![0xABu8; 2_500_000]).unwrap();
 
-        wipe_device(&path, &ZeroPass, &WipeOptions::default()).unwrap();
+        wipe_device(&path, &ZeroPass, &WipeOptions::default(), &NoProgress).unwrap();
 
         assert_eq!(fs::metadata(&path).unwrap().len(), 2_500_000);
         fs::remove_file(&path).unwrap();
@@ -296,11 +313,8 @@ mod tests {
         let path = temp_path("verify_ok");
         fs::write(&path, vec![0xABu8; 3_000_000]).unwrap();
 
-        let opts = WipeOptions {
-            verify: true,
-            ..Default::default()
-        };
-        wipe_device(&path, &crate::methods::standards::ONES, &opts).unwrap();
+        let opts = WipeOptions { verify: true };
+        wipe_device(&path, &crate::methods::standards::ONES, &opts, &NoProgress).unwrap();
 
         let data = fs::read(&path).unwrap();
         assert!(data.iter().all(|&b| b == 0xFF));
@@ -312,7 +326,7 @@ mod tests {
         let path = temp_path("file_remove");
         fs::write(&path, b"secret").unwrap();
 
-        wipe_file(&path, &ZeroPass, &WipeOptions::default()).unwrap();
+        wipe_file(&path, &ZeroPass, &WipeOptions::default(), &NoProgress).unwrap();
 
         assert!(!path.exists());
     }
@@ -322,7 +336,7 @@ mod tests {
         let path = temp_path("file_empty");
         fs::write(&path, []).unwrap();
 
-        wipe_file(&path, &ZeroPass, &WipeOptions::default()).unwrap();
+        wipe_file(&path, &ZeroPass, &WipeOptions::default(), &NoProgress).unwrap();
 
         assert!(!path.exists());
     }
@@ -339,7 +353,7 @@ mod tests {
         f.set_len(64 * 1024 * 1024).unwrap();
         drop(f);
 
-        wipe_file(&path, &ZeroPass, &WipeOptions::default()).unwrap();
+        wipe_file(&path, &ZeroPass, &WipeOptions::default(), &NoProgress).unwrap();
 
         assert!(!path.exists());
     }
@@ -357,7 +371,7 @@ mod tests {
         let ranges = vec![(0u64, size)];
         let seed: u64 = 0x1234_5678;
         let method = RandomPass::new(3);
-        let pb = ProgressBar::hidden();
+        let pb = NoProgress;
         let mut buffer = vec![0u8; BUFFER_SIZE];
 
         wipe_passes(&mut file, &ranges, &method, seed, &pb, &mut buffer).unwrap();
@@ -379,7 +393,7 @@ mod tests {
         let ranges = vec![(0u64, size)];
         let seed: u64 = 0x1234_5678;
         let method = RandomPass::new(3);
-        let pb = ProgressBar::hidden();
+        let pb = NoProgress;
         let mut buffer = vec![0u8; BUFFER_SIZE];
 
         wipe_passes(&mut file, &ranges, &method, seed, &pb, &mut buffer).unwrap();

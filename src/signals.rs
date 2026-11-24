@@ -1,5 +1,5 @@
-//! Ctrl-C / SIGTERM handling: sets an atomic flag that the wiper checks
-//! between chunks so a wipe can stop cleanly and report partial state.
+//! Ctrl-C / SIGTERM handling and cancellation: an atomic flag that the wiper
+//! checks between chunks so a wipe can stop cleanly and report partial state.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -32,6 +32,17 @@ pub fn install() {
             let _ = SetConsoleCtrlHandler(Some(on_ctrl), 1);
         }
     }
+}
+
+/// Ask a running wipe to stop at the next chunk, as Ctrl-C would. Used by
+/// front-ends without a terminal (e.g. a GUI "Cancel" button).
+pub fn request_cancel() {
+    INTERRUPTED.store(true, Ordering::Relaxed);
+}
+
+/// Clear a previous cancellation so the next wipe can run.
+pub fn reset() {
+    INTERRUPTED.store(false, Ordering::Relaxed);
 }
 
 pub fn interrupted() -> bool {
