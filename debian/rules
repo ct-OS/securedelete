@@ -1,0 +1,31 @@
+#!/usr/bin/make -f
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+# cxx-qt-build and gui/build.rs locate Qt 6 through these.
+export QMAKE = /usr/lib/qt6/bin/qmake6
+export LRELEASE = /usr/lib/qt6/bin/lrelease
+# Prefer a rustup toolchain over the distribution's (too old) rustc.
+export PATH := $(HOME)/.cargo/bin:$(PATH)
+export CARGO_TERM_COLOR = never
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+
+override_dh_auto_build:
+	cargo --version
+	cargo build --release --locked --workspace
+
+override_dh_auto_test:
+ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
+	cargo test --release --locked
+endif
+
+override_dh_auto_install:
+
+override_dh_auto_clean:
+	rm -rf target
+
+# Rust's DWARF is large and dwz often fails on it.
+override_dh_dwz:

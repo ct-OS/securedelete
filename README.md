@@ -68,6 +68,29 @@ Los datos aleatorios se generan con `rand` (`ChaCha12`/`ChaCha20`, alimentado po
 
 ## Instalación
 
+### Paquetes publicados
+
+Cada versión publicada en
+[Releases](https://github.com/ct-OS/securedelete/releases) incluye:
+
+| Sistema | Fichero | Contenido |
+|---|---|---|
+| Deepin 25 / Debian (amd64, arm64, riscv64, loong64) | `secure-delete_<versión>_<arq>.deb` | Línea de órdenes (`/usr/bin/secure_delete`) |
+| | `secure-delete-gui_<versión>_<arq>.deb` | Interfaz DTK6, lanzador, icono y política polkit |
+| Windows (x86_64, arm64) | `secure-delete-<versión>-windows-<arq>.zip` | `secure_delete.exe` (línea de órdenes) |
+| macOS (Apple Silicon e Intel) | `secure-delete-<versión>-macos-universal.tar.gz` | Binario universal (línea de órdenes) |
+
+```bash
+# Deepin / Debian: CLI e interfaz gráfica
+sudo apt install ./secure-delete_*.deb ./secure-delete-gui_*.deb
+
+# macOS: el binario no está firmado; quita la cuarentena antes de usarlo
+xattr -d com.apple.quarantine secure_delete
+```
+
+La interfaz gráfica solo existe para Linux, porque DTK (Deepin Tool Kit) no está
+disponible en Windows ni en macOS; en esos sistemas se distribuye la línea de órdenes.
+
 ### Desde el código fuente
 
 Requiere [Rust](https://rustup.rs/) (edición 2021).
@@ -358,8 +381,42 @@ cargo clippy --all-targets
 cargo fmt --check
 ```
 
-Hay un workflow de CI (`.github/workflows/ci.yml`) que ejecuta fmt, clippy con
-`-D warnings`, los tests y comprobaciones cruzadas para Windows, macOS y los BSD.
+### Integración continua y publicación
+
+- **`.github/workflows/ci.yml`** (en cada push y pull request a `main`/`master`):
+  - fmt y clippy con `-D warnings`;
+  - tests, compilación release y una prueba de humo de la CLI de forma **nativa en
+    Linux, Windows y macOS**;
+  - comprobación cruzada para FreeBSD y NetBSD;
+  - el paquete `.deb` para amd64 dentro de un contenedor `linuxdeepin/deepin:crimson`
+    (se guarda como artefacto del run).
+- **`.github/workflows/publish.yml`** (en cada push a `main`/`master`): lee la versión de
+  `debian/changelog` y, si la etiqueta `v<versión>` aún no existe:
+  - compila los `.deb` para amd64, arm64, riscv64 y loong64 (las tres últimas con QEMU);
+  - compila los binarios de Windows (x86_64 y arm64) y de macOS (universal);
+  - publica la release con todos ellos y las notas del changelog.
+
+  Si Windows o macOS fallan, la release se publica igualmente con los `.deb`.
+
+Para **publicar una versión nueva**:
+
+1. Sube la versión en `Cargo.toml` y `gui/Cargo.toml` (el workflow comprueba que las
+   tres coincidan).
+2. Añade una entrada al principio de `debian/changelog` (`dch -v 0.3.0` o a mano).
+3. Haz push a `master`.
+
+La receta del `.deb` está en `debian/` y la imagen de compilación en
+`.github/workflows/Dockerfile`. deepin crimson trae rustc 1.81 y `cxx`/`cxx-qt` piden
+1.88 o posterior, así que la imagen instala Rust estable con rustup. Para generar los
+paquetes en local, con Docker:
+
+```bash
+docker build --target builder -t secure-delete-deb -f .github/workflows/Dockerfile .
+id=$(docker create secure-delete-deb) && docker cp "$id":/output/. dist/ && docker rm "$id"
+```
+
+O directamente con `dpkg-buildpackage -us -uc -b` si tienes las dependencias de
+`debian/control` y un `cargo` 1.88 o posterior en el `PATH`.
 
 El proyecto es un workspace: el paquete raíz (`secure_delete`) contiene la
 librería (`src/lib.rs`: métodos, plataforma y wiper) y la CLI (`src/main.rs`);

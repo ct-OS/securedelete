@@ -1,0 +1,252 @@
+name: Build and publish release
+
+# Release automatica: en cada push a main/master se lee la version de
+# debian/changelog. Si la etiqueta v<version> aun no existe, se compilan los
+# .deb de todas las arquitecturas y los binarios de Windows y macOS, y se
+# publica la release con esa etiqueta. Para sacar una version nueva basta con
+# subir la version en Cargo.toml y anadir una entrada al changelog.
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+      release: ${{ steps.v.outputs.release }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Read version from debian/changelog
+        id: v
+        run: |
+          # "pkg (1:1.2.3-1) unstable; ..." -> 1.2.3 (sin epoch ni revision debian)
+          full=$(sed -n '1s/^[^ ]* (\([^)]*\)).*/\1/p' debian/changelog)
+          version=${full#*:}
+          version=${version%-*}
+          # La version de Cargo.toml (la que muestra --version y el dialogo
+          # "Acerca de") debe coincidir con la del changelog.
+          cargo_version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          gui_version=$(sed -n 's/^version = "\(.*\)"/\1/p' gui/Cargo.toml | head -n 1)
+          if [ "$cargo_version" != "$version" ] || [ "$gui_version" != "$version" ]; then
+            echo "::error::debian/changelog dice ${version}, Cargo.toml ${cargo_version} y gui/Cargo.toml ${gui_version}"
+            exit 1
+          fi
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            tag="${GITHUB_REF_NAME}"
+            release=true
+          else
+            tag="v${version}"
+            if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+              # La etiqueta ya existe: en push normal no se publica nada;
+              # lanzado a mano se recompila y se actualiza esa release.
+              if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then release=true; else release=false; fi
+            else
+              release=true
+            fi
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "release=${release}" >> "$GITHUB_OUTPUT"
+          echo "Version: ${version} | tag: ${tag} | publicar: ${release}"
+
+  build-deb:
+    needs: check
+    if: needs.check.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    # Las arquitecturas emuladas con QEMU compilan Rust + Qt muy despacio.
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            base_image: linuxdeepin/deepin:crimson
+          - arch: arm64
+            platform: linux/arm64
+            base_image: linuxdeepin/deepin:crimson-arm64
+          - arch: riscv64
+            platform: linux/riscv64
+            base_image: linuxdeepin/deepin:crimson-riscv64
+          - arch: loong64
+            platform: linux/loong64
+            base_image: linuxdeepin/deepin:crimson-loong64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up QEMU
+        if: matrix.arch != 'amd64'
+        uses: docker/setup-qemu-action@v4.2.0
+        with:
+          platforms: ${{ matrix.platform }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4.2.0
+
+      - name: Build Docker image and package .deb
+        run: |
+          mkdir -p dist
+          docker buildx build \
+            --platform ${{ matrix.platform }} \
+            --build-arg BASE_IMAGE=${{ matrix.base_image }} \
+            --output type=local,dest=dist \
+            --cache-from type=gha,scope=${{ matrix.arch }} \
+            --cache-to type=gha,mode=max,scope=${{ matrix.arch }} \
+            -t secure-delete-builder:${{ matrix.arch }} \
+            -f .github/workflows/Dockerfile .
+
+      - name: Check .deb
+        run: |
+          rm -f dist/*dbgsym*
+          ls -lh dist/
+          for deb in dist/*.deb; do
+            dpkg-deb --info "$deb"
+          done
+
+      - name: Upload .deb as artifact
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: deb-${{ matrix.arch }}
+          path: dist/*.deb
+          if-no-files-found: error
+
+  # CLI para Windows (la GUI usa DTK, que solo existe en Linux).
+  build-windows:
+    needs: check
+    if: needs.check.outputs.release == 'true'
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            target: x86_64-pc-windows-msvc
+          - arch: arm64
+            target: aarch64-pc-windows-msvc
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package .zip
+        shell: pwsh
+        run: |
+          $name = "secure-delete-${{ needs.check.outputs.version }}-windows-${{ matrix.arch }}"
+          New-Item -ItemType Directory -Path $name | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/secure_delete.exe" $name
+          Copy-Item README.md $name
+          Compress-Archive -Path $name -DestinationPath "$name.zip"
+          Get-ChildItem *.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: windows-${{ matrix.arch }}
+          path: '*.zip'
+          if-no-files-found: error
+
+  # CLI para macOS: binario universal (Apple Silicon + Intel).
+  build-macos:
+    needs: check
+    if: needs.check.outputs.release == 'true'
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+
+      - name: Build
+        run: |
+          cargo build --release --locked --target aarch64-apple-darwin
+          cargo build --release --locked --target x86_64-apple-darwin
+
+      - name: Universal binary and .tar.gz
+        run: |
+          name="secure-delete-${{ needs.check.outputs.version }}-macos-universal"
+          mkdir "$name"
+          lipo -create -output "$name/secure_delete" \
+            target/aarch64-apple-darwin/release/secure_delete \
+            target/x86_64-apple-darwin/release/secure_delete
+          lipo -info "$name/secure_delete"
+          "$name/secure_delete" --version
+          cp README.md "$name/"
+          tar -czf "$name.tar.gz" "$name"
+          ls -lh *.tar.gz
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: macos-universal
+          path: '*.tar.gz'
+          if-no-files-found: error
+
+  release:
+    needs: [check, build-deb, build-windows, build-macos]
+    # Se publica aunque falle Windows o macOS, siempre que los .deb esten bien
+    if: always() && needs.check.outputs.release == 'true' && needs.build-deb.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Release notes from debian/changelog
+        run: |
+          # Primera entrada del changelog (sin cabecera ni firma)
+          awk 'NR==1{next} /^ -- /{exit} {print}' debian/changelog | sed 's/^  //' > notes.md
+          cat >> notes.md <<'EOF'
+
+          ### Descargas
+
+          - **Deepin / Debian** (`.deb`): `secure-delete` (línea de órdenes) y
+            `secure-delete-gui` (interfaz DTK). Instala los dos con
+            `sudo apt install ./secure-delete_*.deb ./secure-delete-gui_*.deb`.
+          - **Windows** (`.zip`): `secure_delete.exe`, solo línea de órdenes.
+          - **macOS** (`.tar.gz`): binario universal, solo línea de órdenes. No
+            está firmado: quita la cuarentena con
+            `xattr -d com.apple.quarantine secure_delete`.
+          EOF
+          cat notes.md
+          ls -lh dist/
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v3.0.2
+        with:
+          tag_name: ${{ needs.check.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ github.event.repository.name }} ${{ needs.check.outputs.tag }}
+          body_path: notes.md
+          generate_release_notes: true
+          files: dist/*
+          fail_on_unmatched_files: true

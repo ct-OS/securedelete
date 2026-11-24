@@ -1,0 +1,13 @@
+secure-delete (0.2.0) unstable; urgency=medium
+
+  * Interfaz gráfica para Deepin (Qt 6 / DTK6): borrado de ficheros con
+    arrastrar y soltar, lista de unidades detectadas con conexión en
+    caliente, progreso, cancelación y traducción al español.
+  * Borrado de unidades desde la interfaz con pkexec (política polkit
+    incluida).
+  * Menú de la barra de título al estilo Deepin y diálogo «Acerca de».
+  * Nueva opción --list-devices en la línea de órdenes.
+  * Paquetes .deb (secure-delete y secure-delete-gui) y publicación
+    automática en GitHub con binarios para Windows y macOS.
+
+ -- Alvaro Samudio <alvarosamudio@protonmail.com>  Tue, 24 Nov 2026 03:30:00 -0500

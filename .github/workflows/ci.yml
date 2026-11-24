@@ -2,29 +2,102 @@ name: CI
 
 on:
   push:
+    branches: [main, master]
   pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
-    name: fmt + clippy + tests (Linux)
+  lint:
+    name: fmt + clippy (Linux)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - run: cargo fmt --check
+      - run: cargo fmt --all --check
+      # Solo el paquete raiz (CLI + biblioteca): la GUI necesita Qt 6 y se
+      # compila en el job build-deb.
       - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test
 
+  # Compilacion y pruebas nativas de la CLI en los tres sistemas.
+  test:
+    name: tests (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-latest
+          - name: Windows
+            os: windows-latest
+          - name: macOS
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --locked
+      - run: cargo build --release --locked
+      - name: Smoke test
+        shell: bash
+        run: |
+          bin=target/release/secure_delete
+          [ -f "$bin.exe" ] && bin="$bin.exe"
+          "$bin" --version
+          "$bin" --list-methods
+          echo "datos de prueba" > smoke.txt
+          "$bin" --force --quiet smoke.txt
+          test ! -e smoke.txt
+
+  # Sistemas sin runner propio: solo se comprueba que compila.
   cross:
-    name: cross-target check
+    name: cross-target check (BSD)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - run: rustup target add x86_64-pc-windows-gnu x86_64-apple-darwin x86_64-unknown-freebsd x86_64-unknown-netbsd
-      - run: cargo check --target x86_64-pc-windows-gnu
-      - run: cargo check --target x86_64-apple-darwin
+        with:
+          targets: x86_64-unknown-freebsd, x86_64-unknown-netbsd
       - run: cargo check --target x86_64-unknown-freebsd
       - run: cargo check --target x86_64-unknown-netbsd
+
+  build-deb:
+    name: .deb (deepin crimson, amd64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4.2.0
+
+      - name: Build and verify compilation
+        run: |
+          mkdir -p dist
+          docker buildx build \
+            --platform linux/amd64 \
+            --build-arg BASE_IMAGE=linuxdeepin/deepin:crimson \
+            --output type=local,dest=dist \
+            -f .github/workflows/Dockerfile .
+
+      - name: Verify .deb was produced
+        run: |
+          ls -lh dist/
+          ls dist/*.deb >/dev/null
+          for deb in dist/*.deb; do
+            echo "== $deb"
+            dpkg-deb --info "$deb"
+            dpkg-deb --contents "$deb"
+          done
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: deb-amd64
+          path: dist/*.deb
+          if-no-files-found: error

@@ -1,0 +1,4 @@
+target/release/secure-delete-gui usr/bin
+gui/data/secure-delete.desktop usr/share/applications
+gui/data/secure-delete.svg usr/share/icons/hicolor/scalable/apps
+gui/data/org.securedelete.wipe-device.policy usr/share/polkit-1/actions

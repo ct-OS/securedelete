@@ -1,2 +1,12 @@
 /target
 gui/.qmlls.ini
+
+# dpkg-buildpackage
+debian/.debhelper/
+debian/secure-delete/
+debian/secure-delete-gui/
+debian/tmp/
+debian/files
+debian/*.substvars
+debian/*.debhelper.log
+debian/debhelper-build-stamp

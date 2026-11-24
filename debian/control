@@ -1,0 +1,49 @@
+Source: secure-delete
+Section: utils
+Priority: optional
+Maintainer: Alvaro Samudio <alvarosamudio@protonmail.com>
+# The Rust toolchain (>= 1.88, required by cxx / cxx-qt) is not listed here:
+# deepin crimson ships rustc 1.81, so the build uses rustup's stable
+# toolchain (see .github/workflows/Dockerfile). Any cargo >= 1.88 on PATH
+# works for a local build.
+Build-Depends: debhelper-compat (= 13),
+               pkg-config,
+               qmake6,
+               qt6-base-dev,
+               qt6-declarative-dev,
+               qt6-l10n-tools,
+               qt6-tools-dev-tools
+Standards-Version: 4.6.2
+Homepage: https://github.com/ct-OS/securedelete
+Vcs-Browser: https://github.com/ct-OS/securedelete
+Vcs-Git: https://github.com/ct-OS/securedelete.git
+Rules-Requires-Root: no
+
+Package: secure-delete
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: securely delete files or whole storage devices
+ Overwrites files or block devices before deleting them, using standard
+ sanitization methods: zeros, random data, DoD 5220.22-M, Gutmann,
+ NIST 800-88, BSI, VSITR and others. It can verify the last pass, handles
+ sparse files and refuses to wipe mounted devices.
+ .
+ This package contains the command-line tool.
+
+Package: secure-delete-gui
+Architecture: any
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+         secure-delete (= ${binary:Version}),
+         hicolor-icon-theme,
+         libdtk6declarative,
+         pkexec,
+         qml6-module-qtquick,
+         qml6-module-qtquick-controls,
+         qml6-module-qtquick-dialogs,
+         qml6-module-qtquick-layouts
+Description: securely delete files or storage devices - Deepin interface
+ Graphical front-end for secure-delete built with Qt 6 and DTK6 (Deepin
+ Tool Kit). Choose a file or a detected storage device, pick a wipe method
+ and follow the progress. Wiping a device asks for an administrator
+ password through polkit (pkexec).
