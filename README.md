@@ -199,6 +199,75 @@ rechaza el borrado nativo y recomienda la sobrescritura (`-d -m <method>`).
   `BLKROTATIONAL` sobre el dispositivo contenedor), se muestra una nota indicando que la
   sobrescritura puede no borrar físicamente todos los bloques y se sugiere `--secure-erase`.
 
+## Interfaz gráfica (Deepin / DTK6)
+
+El directorio [`gui/`](gui/) contiene una interfaz gráfica opcional hecha con Qt 6 y
+el **Deepin Tool Kit** (DtkDeclarative), escrita en Rust con
+[cxx-qt](https://github.com/KDAB/cxx-qt). Usa los componentes nativos de Deepin
+(barra de título, botones, diálogos, tema claro/oscuro y color de acento del
+sistema) y la misma librería que la CLI.
+
+Funciones:
+
+- **Ficheros:** arrastrar y soltar o elegir un fichero; también acepta una ruta como
+  argumento (`secure-delete-gui <fichero>`).
+- **Unidades:** lista las unidades de almacenamiento detectadas (modelo, tamaño, USB o
+  extraíble, SSD o HDD) y se actualiza sola al conectar o desconectar una. Las que están
+  montadas o contienen el sistema aparecen bloqueadas, con el motivo.
+- Selección de método, verificación opcional, progreso por pasada con cancelación y
+  diálogo de confirmación.
+- En español o en inglés según el idioma del sistema.
+
+```bash
+# Dependencias (Deepin 25 / Debian)
+sudo apt install qt6-base-dev qt6-declarative-dev qt6-l10n-tools libdtk6declarative-dev
+
+# Compilar y ejecutar (la GUI no forma parte de la compilación por defecto)
+cargo build                       # la CLI, que la GUI usa como helper con privilegios
+cargo run -p secure_delete_gui
+```
+
+Solo funciona en Linux con DTK6 instalado.
+
+### Borrar unidades: privilegios con pkexec
+
+La GUI se ejecuta como usuario normal. Para borrar una unidad lanza la propia CLI con
+`pkexec secure_delete --gui-helper --device --force ...`: polkit pide la contraseña de
+administrador, la CLI vuelve a validar el destino como root y envía el progreso a la
+GUI por stdout. Cancelar cierra el stdin del helper, que se detiene en el siguiente
+bloque. La GUI busca la CLI en `$SECURE_DELETE_CLI`, junto a su propio ejecutable o en
+`/usr/bin` y `/usr/local/bin`.
+
+Al instalar, copia la política de polkit para que el diálogo muestre un mensaje propio
+en lugar de la línea de comandos:
+
+```bash
+sudo install -m 755 target/release/secure_delete /usr/bin/secure_delete
+sudo install -m 644 gui/data/org.securedelete.wipe-device.policy /usr/share/polkit-1/actions/
+
+# Lanzador e icono (para el menú de aplicaciones y el dock)
+sudo install -m 755 target/release/secure-delete-gui /usr/bin/secure-delete-gui
+sudo install -Dm 644 gui/data/secure-delete.svg /usr/share/icons/hicolor/scalable/apps/secure-delete.svg
+sudo install -m 644 gui/data/secure-delete.desktop /usr/share/applications/
+```
+
+El icono también va incrustado en el binario, así que la ventana lo muestra aunque no
+esté instalado.
+
+La CLI también lista las unidades: `secure_delete --list-devices`.
+
+### Traducciones
+
+Los textos están en inglés y se traducen con el sistema de Qt. `build.rs` compila con
+`lrelease` dos catálogos en un `.qm` que va incrustado en el binario:
+
+- `gui/i18n/secure-delete_es.ts`: textos del QML. Para actualizarlo:
+  `lupdate -no-obsolete gui/qml/main.qml -ts gui/i18n/secure-delete_es.ts` (el `lupdate` de Qt 6).
+- `gui/i18n/rust_es.ts`: textos generados en Rust (`i18n::tr`) y los mensajes de
+  validación de la librería. Se mantiene a mano porque `lupdate` no lee Rust.
+
+Para SSD completos usa la CLI con `--secure-erase`.
+
 ## Cómo funciona
 
 1. **Validación:** se comprueba que el objetivo sea un fichero regular o un block device, y que no se trate de un directorio, symlink, la raíz del sistema ni (en Linux) un dispositivo montado. Los ficheros se abren con `O_NOFOLLOW` para evitar carreras de symlinks.
@@ -291,6 +360,12 @@ cargo fmt --check
 
 Hay un workflow de CI (`.github/workflows/ci.yml`) que ejecuta fmt, clippy con
 `-D warnings`, los tests y comprobaciones cruzadas para Windows, macOS y los BSD.
+
+El proyecto es un workspace: el paquete raíz (`secure_delete`) contiene la
+librería (`src/lib.rs`: métodos, plataforma y wiper) y la CLI (`src/main.rs`);
+`gui/` (`secure_delete_gui`) es la interfaz DTK6. `cargo build`/`cargo test` en la
+raíz solo compilan la CLI, así que no hace falta Qt; la GUI se compila con
+`cargo build -p secure_delete_gui`.
 
 ## Licencia
 

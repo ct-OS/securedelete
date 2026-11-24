@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!--
+  Install to /usr/share/polkit-1/actions/ together with the CLI at
+  /usr/bin/secure_delete. pkexec then shows this message instead of the raw
+  command line. Authentication is never cached (auth_admin, not
+  auth_admin_keep): every device wipe asks again.
+-->
+<policyconfig>
+  <action id="org.securedelete.wipe-device">
+    <description>Securely wipe a storage device</description>
+    <description xml:lang="es">Borrar de forma segura una unidad de almacenamiento</description>
+    <message>Authentication is required to overwrite a whole storage device. All data on it will be lost.</message>
+    <message xml:lang="es">Se necesita autenticación para sobrescribir una unidad de almacenamiento completa. Se perderán todos sus datos.</message>
+    <icon_name>drive-harddisk</icon_name>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/secure_delete</annotate>
+  </action>
+</policyconfig>

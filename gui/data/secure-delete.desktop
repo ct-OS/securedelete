@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=Secure Delete
+Name[es]=Borrado seguro
+GenericName=File shredder
+GenericName[es]=Destructor de ficheros
+Comment=Irreversibly overwrite files and storage devices
+Comment[es]=Sobrescribe ficheros y unidades de almacenamiento de forma irreversible
+Exec=secure-delete-gui %f
+Icon=secure-delete
+Terminal=false
+Categories=Utility;Security;
+Keywords=wipe;shred;erase;delete;secure;borrar;triturar;
+MimeType=application/octet-stream;
+StartupWMClass=secure-delete-gui

@@ -1,0 +1,8 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <!-- Under :/icons so QIcon::fromTheme("secure-delete") finds it in the
+         hicolor fallback theme even when the app is not installed. -->
+    <qresource prefix="/icons/hicolor/scalable/apps">
+        <file alias="secure-delete.svg">data/secure-delete.svg</file>
+    </qresource>
+</RCC>

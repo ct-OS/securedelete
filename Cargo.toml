@@ -5,6 +5,11 @@ edition = "2021"
 description = "Securely delete files or storage devices using data overwriting"
 license = "MIT"
 
+[workspace]
+members = [".", "gui"]
+# The GUI needs Qt 6 + DTK; build it explicitly with `cargo build -p secure_delete_gui`.
+default-members = ["."]
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 rand = "0.9"
