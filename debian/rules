@@ -1,12 +1,19 @@
 #!/usr/bin/make -f
 
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+include /usr/share/dpkg/architecture.mk
 # cxx-qt-build and gui/build.rs locate Qt 6 through these.
 export QMAKE = /usr/lib/qt6/bin/qmake6
 export LRELEASE = /usr/lib/qt6/bin/lrelease
 # Prefer a rustup toolchain over the distribution's (too old) rustc.
 export PATH := $(HOME)/.cargo/bin:$(PATH)
 export CARGO_TERM_COLOR = never
+
+# On loongarch64 rustc passes LLD-only flags (--no-rosegment) but the system
+# GNU ld ends up linking; use the distribution's lld instead.
+ifeq ($(DEB_HOST_ARCH),loong64)
+export RUSTFLAGS += -Clink-arg=-fuse-ld=lld
+endif
 
 %:
 	dh $@
