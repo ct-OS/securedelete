@@ -19,6 +19,12 @@ export RUSTFLAGS += -Clink-arg=-B$(RUST_GCC_LD) -Clink-arg=-fuse-ld=lld
 endif
 endif
 
+# GCC 12 writes absolute relocations into .eh_frame on loongarch64, which lld
+# rejects in a PIE; clang emits PC-relative ones. (g++-13 is not installable.)
+ifeq ($(DEB_HOST_ARCH),loong64)
+export CXX = clang++
+endif
+
 %:
 	dh $@
 
