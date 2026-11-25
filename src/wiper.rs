@@ -238,7 +238,14 @@ fn wipe_device_inner(
     pb: &dyn Progress,
 ) -> io::Result<()> {
     let mut device = crate::platform::open_device(path)?;
-    let size = crate::platform::device_size(&mut device)?;
+    // A regular file (e.g. a disk image) has its size in the metadata; the
+    // platform ioctls only work on real devices on macOS, Windows and BSD.
+    let meta = device.metadata()?;
+    let size = if meta.is_file() {
+        meta.len()
+    } else {
+        crate::platform::device_size(&mut device)?
+    };
     if size == 0 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
