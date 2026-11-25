@@ -9,10 +9,14 @@ export LRELEASE = /usr/lib/qt6/bin/lrelease
 export PATH := $(HOME)/.cargo/bin:$(PATH)
 export CARGO_TERM_COLOR = never
 
-# On loongarch64 rustc passes LLD-only flags (--no-rosegment) but the system
-# GNU ld ends up linking; use the distribution's lld instead.
-ifeq ($(DEB_HOST_ARCH),loong64)
-export RUSTFLAGS += -Clink-arg=-fuse-ld=lld
+# Off amd64, rustc asks gcc for -fuse-ld=lld without supplying an lld, and the
+# distribution's lld 17 lacks relocations newer Rust needs on loongarch64.
+# Point gcc at the rust-lld bundled with the toolchain instead.
+ifneq ($(DEB_HOST_ARCH),amd64)
+RUST_GCC_LD := $(firstword $(wildcard $(shell $(HOME)/.cargo/bin/rustc --print sysroot 2>/dev/null)/lib/rustlib/*/bin/gcc-ld))
+ifneq ($(RUST_GCC_LD),)
+export RUSTFLAGS += -Clink-arg=-B$(RUST_GCC_LD) -Clink-arg=-fuse-ld=lld
+endif
 endif
 
 %:

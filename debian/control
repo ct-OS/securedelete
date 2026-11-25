@@ -7,7 +7,6 @@ Maintainer: Alvaro Samudio <alvarosamudio@protonmail.com>
 # toolchain (see .github/workflows/Dockerfile). Any cargo >= 1.88 on PATH
 # works for a local build.
 Build-Depends: debhelper-compat (= 13),
-               lld [loong64],
                pkg-config,
                qmake6,
                qt6-base-dev,
