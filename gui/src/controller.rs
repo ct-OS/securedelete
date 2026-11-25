@@ -59,6 +59,12 @@ pub mod qobject {
         #[cxx_name = "devicesJson"]
         fn devices_json(self: &WipeController) -> QString;
 
+        /// Whether the GUI can list and wipe whole devices (Linux only: device
+        /// discovery reads /sys/block and elevation goes through pkexec).
+        #[qinvokable]
+        #[cxx_name = "supportsDevices"]
+        fn supports_devices(self: &WipeController) -> bool;
+
         /// Whether wiping a device will go through pkexec (we are not root).
         #[qinvokable]
         #[cxx_name = "needsElevation"]
@@ -201,6 +207,10 @@ impl qobject::WipeController {
         QString::from(&format!("[{}]", items.join(",")))
     }
 
+    fn supports_devices(&self) -> bool {
+        cfg!(target_os = "linux")
+    }
+
     fn needs_elevation(&self) -> bool {
         !is_root()
     }
@@ -227,6 +237,15 @@ impl qobject::WipeController {
                 .finished(false, QString::from(&tr("Unknown wipe method.")));
             return;
         };
+        if device && !self.supports_devices() {
+            self.as_mut().finished(
+                false,
+                QString::from(&tr(
+                    "Wiping whole devices is only available from the command line on this system.",
+                )),
+            );
+            return;
+        }
         // Re-validate: the target may have changed since the user picked it.
         let check = self.check_target(&QString::from(&path.to_string_lossy().into_owned()), device);
         if !check.is_empty() {
@@ -308,9 +327,16 @@ fn json_str(s: &str) -> String {
     out
 }
 
+#[cfg(unix)]
 fn is_root() -> bool {
     // SAFETY: geteuid has no preconditions and cannot fail.
     unsafe { libc::geteuid() == 0 }
+}
+
+/// Device wiping (the only privileged operation) is Linux-only in the GUI.
+#[cfg(not(unix))]
+fn is_root() -> bool {
+    false
 }
 
 /// The CLI binary to run as the privileged helper: `$SECURE_DELETE_CLI`, the

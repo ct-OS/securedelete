@@ -66,6 +66,23 @@ jobs:
       - run: cargo check --target x86_64-unknown-freebsd
       - run: cargo check --target x86_64-unknown-netbsd
 
+  # GUI de Windows: interfaz Qt Quick Controls (DTK solo existe en Linux).
+  gui-windows:
+    name: GUI (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Qt 6 (MSVC)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Build, deploy Qt and smoke test
+        shell: pwsh
+        run: ./.github/workflows/windows-gui.ps1 -Version ci
+
   build-deb:
     name: .deb (deepin crimson, amd64)
     runs-on: ubuntu-latest

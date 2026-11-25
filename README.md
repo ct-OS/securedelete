@@ -77,7 +77,8 @@ Cada versión publicada en
 |---|---|---|
 | Deepin 25 / Debian (amd64, arm64, riscv64, loong64) | `secure-delete_<versión>_<arq>.deb` | Línea de órdenes (`/usr/bin/secure_delete`) |
 | | `secure-delete-gui_<versión>_<arq>.deb` | Interfaz DTK6, lanzador, icono y política polkit |
-| Windows (x86_64, arm64) | `secure-delete-<versión>-windows-<arq>.zip` | `secure_delete.exe` (línea de órdenes) |
+| Windows (x86_64) | `secure-delete-gui-<versión>-windows-x86_64.zip` | Interfaz gráfica (`secure-delete-gui.exe`, con Qt incluido) y línea de órdenes |
+| Windows (x86_64, arm64) | `secure-delete-<versión>-windows-<arq>.zip` | Solo `secure_delete.exe` (línea de órdenes) |
 | macOS (Apple Silicon e Intel) | `secure-delete-<versión>-macos-universal.tar.gz` | Binario universal (línea de órdenes) |
 
 ```bash
@@ -88,8 +89,10 @@ sudo apt install ./secure-delete_*.deb ./secure-delete-gui_*.deb
 xattr -d com.apple.quarantine secure_delete
 ```
 
-La interfaz gráfica solo existe para Linux, porque DTK (Deepin Tool Kit) no está
-disponible en Windows ni en macOS; en esos sistemas se distribuye la línea de órdenes.
+En Windows, descomprime `secure-delete-gui-…-windows-x86_64.zip` y ejecuta
+`secure-delete-gui.exe`; no hace falta instalar nada. La interfaz de Windows borra
+ficheros; para borrar unidades completas usa `secure_delete.exe` desde una consola de
+administrador. En macOS solo se distribuye la línea de órdenes.
 
 ### Desde el código fuente
 
@@ -222,7 +225,7 @@ rechaza el borrado nativo y recomienda la sobrescritura (`-d -m <method>`).
   `BLKROTATIONAL` sobre el dispositivo contenedor), se muestra una nota indicando que la
   sobrescritura puede no borrar físicamente todos los bloques y se sugiere `--secure-erase`.
 
-## Interfaz gráfica (Deepin / DTK6)
+## Interfaz gráfica (Deepin / DTK6 y Windows)
 
 El directorio [`gui/`](gui/) contiene una interfaz gráfica opcional hecha con Qt 6 y
 el **Deepin Tool Kit** (DtkDeclarative), escrita en Rust con
@@ -250,7 +253,21 @@ cargo build                       # la CLI, que la GUI usa como helper con privi
 cargo run -p secure_delete_gui
 ```
 
-Solo funciona en Linux con DTK6 instalado.
+Hay dos interfaces con las mismas funciones, en [`gui/qml/`](gui/qml/):
+
+- **`main.qml`**: la de Deepin, con DTK6. Es la que se usa en Linux.
+- **`main_basic.qml`**: solo con Qt Quick Controls, sin DTK. Es la de Windows (y de
+  cualquier sistema sin DTK). En Linux se puede probar con
+  `SECURE_DELETE_UI=basic cargo run -p secure_delete_gui`. Fuera de Linux no ofrece el
+  modo de unidades, porque la detección de unidades y la elevación con pkexec son
+  exclusivas de Linux.
+
+Para compilar la GUI en Windows hace falta Qt 6 para MSVC (por ejemplo con el
+instalador de Qt o `aqt install-qt windows desktop 6.8.3 win64_msvc2022_64`) con su
+`bin` en el `PATH`. El script
+[`.github/workflows/windows-gui.ps1`](.github/workflows/windows-gui.ps1) compila, reúne
+las DLL de Qt con `windeployqt`, comprueba que la ventana arranca sin errores y crea el
+`.zip`; es el mismo que usa el CI.
 
 ### Borrar unidades: privilegios con pkexec
 
@@ -388,12 +405,14 @@ cargo fmt --check
   - tests, compilación release y una prueba de humo de la CLI de forma **nativa en
     Linux, Windows y macOS**;
   - comprobación cruzada para FreeBSD y NetBSD;
+  - la GUI de Windows con Qt 6 (compilación, `windeployqt` y prueba de arranque);
   - el paquete `.deb` para amd64 dentro de un contenedor `linuxdeepin/deepin:crimson`
     (se guarda como artefacto del run).
 - **`.github/workflows/publish.yml`** (en cada push a `main`/`master`): lee la versión de
   `debian/changelog` y, si la etiqueta `v<versión>` aún no existe:
   - compila los `.deb` para amd64, arm64, riscv64 y loong64 (las tres últimas con QEMU);
-  - compila los binarios de Windows (x86_64 y arm64) y de macOS (universal);
+  - compila la CLI de Windows (x86_64 y arm64), la GUI de Windows (x86_64) y la CLI de
+    macOS (universal);
   - publica la release con todos ellos y las notas del changelog.
 
   Si Windows o macOS fallan, la release se publica igualmente con los `.deb`.

@@ -7,6 +7,8 @@ secure-delete (0.2.0) unstable; urgency=medium
     incluida).
   * Menú de la barra de título al estilo Deepin y diálogo «Acerca de».
   * Nueva opción --list-devices en la línea de órdenes.
+  * Interfaz gráfica para Windows (Qt Quick Controls) que borra
+    ficheros, distribuida como .zip con Qt incluido.
   * Paquetes .deb (secure-delete y secure-delete-gui) y publicación
     automática en GitHub con binarios para Windows y macOS.
 

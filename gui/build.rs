@@ -14,7 +14,8 @@ fn lrelease() -> PathBuf {
             .output()
         {
             let dir = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            let candidate = Path::new(&dir).join("lrelease");
+            let exe = format!("lrelease{}", std::env::consts::EXE_SUFFIX);
+            let candidate = Path::new(&dir).join(exe);
             if out.status.success() && candidate.is_file() {
                 return candidate;
             }
@@ -44,7 +45,7 @@ fn compile_translation(name: &str, sources: &[&str]) {
 }
 
 fn main() {
-    // QML strings (refresh with `lupdate qml/main.qml -ts i18n/secure-delete_es.ts`)
+    // QML strings (refresh with `lupdate qml -ts i18n/secure-delete_es.ts`)
     // plus the hand-maintained Rust strings.
     compile_translation(
         "secure-delete_es",
@@ -54,12 +55,17 @@ fn main() {
         println!("cargo:rerun-if-changed={f}");
     }
 
-    CxxQtBuilder::new_qml_module(
-        QmlModule::new("org.securedelete.gui").qml_files(["qml/main.qml"]),
-    )
-    .qt_module("Quick")
-    .include_dir("cpp")
-    .qrc("resources.qrc")
-    .files(["src/controller.rs", "src/i18n.rs", "src/app.rs"])
-    .build();
+    // main.qml needs DTK (Deepin Tool Kit), which only exists on Linux;
+    // main_basic.qml uses plain Qt Quick Controls and works everywhere.
+    let qml: &[&str] = if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
+        &["qml/main.qml", "qml/main_basic.qml"]
+    } else {
+        &["qml/main_basic.qml"]
+    };
+    CxxQtBuilder::new_qml_module(QmlModule::new("org.securedelete.gui").qml_files(qml))
+        .qt_module("Quick")
+        .include_dir("cpp")
+        .qrc("resources.qrc")
+        .files(["src/controller.rs", "src/i18n.rs", "src/app.rs"])
+        .build();
 }

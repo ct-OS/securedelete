@@ -101,5 +101,9 @@
             <source>SSD / flash</source>
             <translation>SSD / flash</translation>
         </message>
+        <message>
+            <source>Wiping whole devices is only available from the command line on this system.</source>
+            <translation>En este sistema, el borrado de unidades completas solo está disponible desde la línea de órdenes.</translation>
+        </message>
     </context>
 </TS>

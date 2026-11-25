@@ -127,7 +127,7 @@ jobs:
           path: dist/*.deb
           if-no-files-found: error
 
-  # CLI para Windows (la GUI usa DTK, que solo existe en Linux).
+  # CLI para Windows (la GUI va en el job build-windows-gui).
   build-windows:
     needs: check
     if: needs.check.outputs.release == 'true'
@@ -166,6 +166,36 @@ jobs:
         with:
           name: windows-${{ matrix.arch }}
           path: '*.zip'
+          if-no-files-found: error
+
+  # GUI para Windows x86_64: interfaz Qt Quick Controls (DTK solo existe en
+  # Linux), con Qt reunido por windeployqt y la CLI incluida.
+  build-windows-gui:
+    needs: check
+    if: needs.check.outputs.release == 'true'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Qt 6 (MSVC)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: win64_msvc2022_64
+          cache: true
+
+      - name: Build, deploy Qt and package .zip
+        shell: pwsh
+        run: ./.github/workflows/windows-gui.ps1 -Version ${{ needs.check.outputs.version }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: windows-gui-x86_64
+          path: 'secure-delete-gui-*.zip'
           if-no-files-found: error
 
   # CLI para macOS: binario universal (Apple Silicon + Intel).
@@ -207,7 +237,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: [check, build-deb, build-windows, build-macos]
+    needs: [check, build-deb, build-windows, build-windows-gui, build-macos]
     # Se publica aunque falle Windows o macOS, siempre que los .deb esten bien
     if: always() && needs.check.outputs.release == 'true' && needs.build-deb.result == 'success'
     runs-on: ubuntu-latest
@@ -232,7 +262,12 @@ jobs:
           - **Deepin / Debian** (`.deb`): `secure-delete` (línea de órdenes) y
             `secure-delete-gui` (interfaz DTK). Instala los dos con
             `sudo apt install ./secure-delete_*.deb ./secure-delete-gui_*.deb`.
-          - **Windows** (`.zip`): `secure_delete.exe`, solo línea de órdenes.
+          - **Windows**: `secure-delete-gui-*-windows-x86_64.zip` trae la interfaz
+            gráfica (`secure-delete-gui.exe`, con Qt incluido) y la línea de órdenes;
+            descomprime la carpeta y ejecuta `secure-delete-gui.exe`. Los
+            `secure-delete-*-windows-*.zip` traen solo `secure_delete.exe`. En
+            Windows la interfaz borra ficheros; las unidades completas se borran
+            desde la línea de órdenes como administrador.
           - **macOS** (`.tar.gz`): binario universal, solo línea de órdenes. No
             está firmado: quita la cuarentena con
             `xattr -d com.apple.quarantine secure_delete`.

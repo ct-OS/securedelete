@@ -2,7 +2,7 @@
 name = "secure_delete_gui"
 version = "0.2.0"
 edition = "2021"
-description = "Deepin (DTK6 / Qt 6) graphical front-end for secure_delete"
+description = "Graphical front-end for secure_delete (Qt 6; DTK6 on Deepin)"
 license = "MIT"
 publish = false
 
@@ -13,9 +13,11 @@ path = "src/main.rs"
 [dependencies]
 secure_delete = { path = ".." }
 cxx = "1"
-libc = "0.2"
 cxx-qt = "0.10.0"
 cxx-qt-lib = { version = "0.10.0", features = ["qt_gui", "qt_qml"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [build-dependencies]
 cxx-qt-build = "0.10.0"
